@@ -9,9 +9,13 @@ Claude 用量菜单栏小组件
 
 import json
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import traceback
 import webbrowser
+import zipfile
 from typing import Optional
 
 import requests
@@ -288,39 +292,115 @@ class ClaudeUsageApp(rumps.App):
         self._build_data_menu(data)
 
 
-# ---------- 版本检查 ----------
+# ---------- 版本检查与自动更新 ----------
+
+def _get_app_path() -> Optional[str]:
+    """获取当前 .app bundle 的路径，非 .app 环境返回 None。"""
+    # PyInstaller 打包后 sys.executable 位于 .app/Contents/MacOS/ 下
+    exe = os.path.realpath(sys.executable)
+    parts = exe.split(os.sep)
+    for i, part in enumerate(parts):
+        if part.endswith(".app"):
+            return os.sep + os.path.join(*parts[1:i + 1])
+    return None
+
+
+def _download_and_update(download_url: str, app_path: str):
+    """下载新版 zip，解压替换当前 app，然后重启。"""
+    tmp_dir = tempfile.mkdtemp(prefix="claude_usage_update_")
+    zip_path = os.path.join(tmp_dir, "ClaudeUsage.zip")
+
+    # 下载
+    with requests.get(download_url, stream=True, timeout=60) as r:
+        r.raise_for_status()
+        with open(zip_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+    # 解压
+    extract_dir = os.path.join(tmp_dir, "extracted")
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(extract_dir)
+
+    # 找到解压后的 .app
+    new_app = None
+    for name in os.listdir(extract_dir):
+        if name.endswith(".app"):
+            new_app = os.path.join(extract_dir, name)
+            break
+    if not new_app:
+        raise FileNotFoundError("zip 中未找到 .app")
+
+    # 用 shell 脚本完成替换和重启（当前进程退出后执行）
+    script = f"""#!/bin/bash
+sleep 1
+rm -rf "{app_path}"
+mv "{new_app}" "{app_path}"
+xattr -cr "{app_path}"
+open "{app_path}"
+rm -rf "{tmp_dir}"
+"""
+    script_path = os.path.join(tmp_dir, "update.sh")
+    with open(script_path, "w") as f:
+        f.write(script)
+    os.chmod(script_path, 0o755)
+
+    subprocess.Popen(["/bin/bash", script_path], start_new_session=True)
+    sys.exit(0)
+
 
 def _check_update():
-    """检查是否有新版本，有则提示用户下载并退出。"""
+    """检查是否有新版本，有则自动下载更新并重启。"""
     try:
         resp = requests.get(
             f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
             timeout=10,
         )
         resp.raise_for_status()
-        latest = resp.json().get("tag_name", "")
-        # 去掉 v 前缀比较，如 "v1.5.0" -> "1.5.0"
+        release = resp.json()
+        latest = release.get("tag_name", "")
         latest_ver = latest.lstrip("v")
         if not latest_ver or latest_ver == APP_VERSION:
             return
-        # 简单版本比较
         from packaging.version import Version
         if Version(latest_ver) <= Version(APP_VERSION):
             return
     except Exception:
-        # 检查失败不阻塞启动
         traceback.print_exc()
         return
 
+    # 找到 zip 下载链接
+    download_url = None
+    for asset in release.get("assets", []):
+        if asset["name"].endswith(".zip"):
+            download_url = asset["browser_download_url"]
+            break
+    if not download_url:
+        return
+
+    app_path = _get_app_path()
+
     clicked = rumps.alert(
         title="发现新版本",
-        message=f"当前版本：v{APP_VERSION}\n最新版本：{latest}\n\n请下载最新版本后重新打开。",
-        ok="前往下载",
-        cancel="退出",
+        message=f"当前版本：v{APP_VERSION}\n最新版本：{latest}\n\n点击「立即更新」将自动下载并重启。",
+        ok="立即更新",
+        cancel="稍后提醒",
     )
-    if clicked:
+    if not clicked:
+        return
+
+    if app_path:
+        try:
+            _download_and_update(download_url, app_path)
+        except Exception:
+            traceback.print_exc()
+            rumps.alert("更新失败", "自动更新出错，请手动前往 GitHub 下载。")
+            webbrowser.open(RELEASES_URL)
+            sys.exit(0)
+    else:
+        # 非 .app 环境（开发模式），打开浏览器
         webbrowser.open(RELEASES_URL)
-    sys.exit(0)
+        sys.exit(0)
 
 
 # ---------- 入口 ----------
