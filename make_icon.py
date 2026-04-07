@@ -10,10 +10,9 @@ import shutil
 import subprocess
 from PIL import Image, ImageDraw, ImageFilter
 
-APP_PATH = os.path.expanduser("~/Applications/ClaudeUsage.app")
-RESOURCES_DIR = os.path.join(APP_PATH, "Contents", "Resources")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ICONSET_DIR = "/tmp/ClaudeUsage.iconset"
-ICNS_PATH = os.path.join(RESOURCES_DIR, "AppIcon.icns")
+ICNS_PATH = os.path.join(SCRIPT_DIR, "AppIcon.icns")
 
 
 def draw_icon(size: int) -> Image.Image:
@@ -86,7 +85,6 @@ def draw_icon(size: int) -> Image.Image:
 
 
 def main():
-    os.makedirs(RESOURCES_DIR, exist_ok=True)
     if os.path.exists(ICONSET_DIR):
         shutil.rmtree(ICONSET_DIR)
     os.makedirs(ICONSET_DIR)
