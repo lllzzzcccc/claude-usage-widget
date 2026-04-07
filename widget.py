@@ -18,6 +18,10 @@ import requests
 import rumps
 
 
+APP_VERSION = "1.4.0"
+GITHUB_REPO = "lllzzzcccc/claude-usage-widget"
+RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
+
 API_BASE = "https://claude.ver0.cc/apiStats/api"
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".claude_usage")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
@@ -284,6 +288,41 @@ class ClaudeUsageApp(rumps.App):
         self._build_data_menu(data)
 
 
+# ---------- 版本检查 ----------
+
+def _check_update():
+    """检查是否有新版本，有则提示用户下载并退出。"""
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
+            timeout=10,
+        )
+        resp.raise_for_status()
+        latest = resp.json().get("tag_name", "")
+        # 去掉 v 前缀比较，如 "v1.5.0" -> "1.5.0"
+        latest_ver = latest.lstrip("v")
+        if not latest_ver or latest_ver == APP_VERSION:
+            return
+        # 简单版本比较
+        from packaging.version import Version
+        if Version(latest_ver) <= Version(APP_VERSION):
+            return
+    except Exception:
+        # 检查失败不阻塞启动
+        traceback.print_exc()
+        return
+
+    clicked = rumps.alert(
+        title="发现新版本",
+        message=f"当前版本：v{APP_VERSION}\n最新版本：{latest}\n\n请下载最新版本后重新打开。",
+        ok="前往下载",
+        cancel="退出",
+    )
+    if clicked:
+        webbrowser.open(RELEASES_URL)
+    sys.exit(0)
+
+
 # ---------- 入口 ----------
 
 def hide_from_dock():
@@ -299,6 +338,7 @@ def hide_from_dock():
 
 def main():
     hide_from_dock()
+    _check_update()
     cfg = _load_config()
     refresh = int(cfg.get("refresh_seconds", 300))
     app = ClaudeUsageApp(refresh_seconds=refresh)

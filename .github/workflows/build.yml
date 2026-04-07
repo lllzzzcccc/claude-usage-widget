@@ -23,6 +23,11 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller pillow
 
+      - name: Stamp version from tag
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          sed -i '' "s/^APP_VERSION = .*/APP_VERSION = \"$VERSION\"/" widget.py
+
       - name: Generate icon
         run: python make_icon.py
 
