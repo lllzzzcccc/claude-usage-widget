@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import traceback
+import webbrowser
 from typing import Optional
 
 import requests
@@ -115,16 +116,29 @@ def _load_config() -> dict:
         return json.load(f)
 
 
+STATS_URL = "https://claude.ver0.cc/admin-next/api-stats"
+
+
 def _prompt_api_id(existing: str = "") -> Optional[str]:
     """弹出输入框让用户输入 api_id，返回 None 表示用户取消。"""
+    if not existing:
+        clicked = rumps.alert(
+            title="获取 API ID",
+            message=(
+                "需要先获取你的 API ID：\n\n"
+                "1. 点击「打开获取页面」跳转到浏览器\n"
+                "2. 输入你的 API Key 并刷新页面\n"
+                "3. 地址栏会出现 appId=xxx，复制该值"
+            ),
+            ok="打开获取页面",
+            cancel="我已有 API ID",
+        )
+        if clicked:
+            webbrowser.open(STATS_URL)
+
     w = rumps.Window(
-        message=(
-            "获取方式：\n"
-            "1. 打开 claude.ver0.cc/admin-next/api-stats\n"
-            "2. 输入你的 API Key 并刷新页面\n"
-            "3. 地址栏会出现 appId=xxx，复制该值粘贴到下方"
-        ),
-        title="请输入 API ID",
+        message="粘贴你的 API ID：",
+        title="ClaudeUsage 配置",
         default_text=existing,
         ok="确定",
         cancel="取消",
