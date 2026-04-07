@@ -304,19 +304,91 @@ def _get_app_path() -> Optional[str]:
     return None
 
 
+class _ProgressWindow:
+    """原生 macOS 进度条窗口。"""
+
+    def __init__(self, title: str):
+        from AppKit import (
+            NSWindow, NSProgressIndicator, NSTextField,
+            NSWindowStyleMaskTitled, NSBackingStoreBuffered,
+            NSProgressIndicatorBarStyle,
+            NSFont, NSColor,
+        )
+        from Foundation import NSRect
+
+        width, height = 360, 100
+        self._window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            NSRect((0, 0), (width, height)),
+            NSWindowStyleMaskTitled,
+            NSBackingStoreBuffered,
+            False,
+        )
+        self._window.setTitle_(title)
+        self._window.center()
+        self._window.setLevel_(25)  # 置顶
+
+        content = self._window.contentView()
+
+        # 状态文字
+        self._label = NSTextField.alloc().initWithFrame_(NSRect((20, 55), (width - 40, 20)))
+        self._label.setStringValue_("准备下载…")
+        self._label.setBezeled_(False)
+        self._label.setDrawsBackground_(False)
+        self._label.setEditable_(False)
+        self._label.setFont_(NSFont.systemFontOfSize_(13))
+        self._label.setTextColor_(NSColor.labelColor())
+        content.addSubview_(self._label)
+
+        # 进度条
+        self._bar = NSProgressIndicator.alloc().initWithFrame_(NSRect((20, 25), (width - 40, 20)))
+        self._bar.setStyle_(NSProgressIndicatorBarStyle)
+        self._bar.setMinValue_(0)
+        self._bar.setMaxValue_(100)
+        self._bar.setDoubleValue_(0)
+        self._bar.setIndeterminate_(False)
+        content.addSubview_(self._bar)
+
+        self._window.makeKeyAndOrderFront_(None)
+
+    def update(self, percent: float, text: str):
+        from AppKit import NSApp
+        self._bar.setDoubleValue_(percent)
+        self._label.setStringValue_(text)
+        # 刷新 UI 事件循环
+        NSApp.nextEventMatchingMask_untilDate_inMode_dequeue_(0xFFFFFFFF, None, "kCFRunLoopDefaultMode", True)
+
+    def close(self):
+        self._window.close()
+
+
 def _download_and_update(download_url: str, app_path: str):
     """下载新版 zip，解压替换当前 app，然后重启。"""
     tmp_dir = tempfile.mkdtemp(prefix="claude_usage_update_")
     zip_path = os.path.join(tmp_dir, "ClaudeUsage.zip")
 
-    # 下载
+    progress = _ProgressWindow("ClaudeUsage 更新")
+
+    # 下载（带进度）
     with requests.get(download_url, stream=True, timeout=60) as r:
         r.raise_for_status()
+        total = int(r.headers.get("content-length", 0))
+        downloaded = 0
         with open(zip_path, "wb") as f:
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
+                downloaded += len(chunk)
+                if total > 0:
+                    pct = downloaded / total * 100
+                    mb_done = downloaded / 1_048_576
+                    mb_total = total / 1_048_576
+                    progress.update(pct, f"下载中… {mb_done:.1f}/{mb_total:.1f} MB")
+                else:
+                    mb_done = downloaded / 1_048_576
+                    progress.update(0, f"下载中… {mb_done:.1f} MB")
 
-    # 解压（用 ditto 保留 macOS 权限和元数据）
+    # 解压
+    progress.update(100, "安装中…")
+
     extract_dir = os.path.join(tmp_dir, "extracted")
     os.makedirs(extract_dir, exist_ok=True)
     subprocess.run(
@@ -332,6 +404,9 @@ def _download_and_update(download_url: str, app_path: str):
             break
     if not new_app:
         raise FileNotFoundError("zip 中未找到 .app")
+
+    progress.update(100, "即将重启…")
+    progress.close()
 
     # 用 shell 脚本完成替换和重启（当前进程退出后执行）
     script = f"""#!/bin/bash
