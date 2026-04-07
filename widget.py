@@ -157,6 +157,7 @@ class ClaudeUsageApp(rumps.App):
         super().__init__("✦ Claude …", quit_button=None)
         self.refresh_seconds = refresh_seconds
         self.api_id = ""
+        self._cancel_count = 0
         self._first_fire = True
         self._build_loading_menu()
         self._timer = rumps.Timer(self._tick, 1.0)
@@ -173,6 +174,9 @@ class ClaudeUsageApp(rumps.App):
         # 弹窗让用户输入
         new_id = _prompt_api_id()
         if not new_id:
+            self._cancel_count += 1
+            if self._cancel_count >= 2:
+                rumps.quit_application()
             return False
         cfg["api_id"] = new_id
         cfg.setdefault("refresh_seconds", 300)
