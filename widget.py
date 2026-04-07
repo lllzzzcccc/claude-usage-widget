@@ -100,26 +100,80 @@ def fetch_usage(api_id: str) -> Optional[dict]:
     }
 
 
+# ---------- 配置读写 ----------
+
+def _save_config(cfg: dict):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+
+def _load_config() -> dict:
+    if not os.path.exists(CONFIG_PATH):
+        return {}
+    with open(CONFIG_PATH) as f:
+        return json.load(f)
+
+
+def _prompt_api_id(existing: str = "") -> Optional[str]:
+    """弹出输入框让用户输入 api_id，返回 None 表示用户取消。"""
+    w = rumps.Window(
+        message="请输入你的 API ID：",
+        title="ClaudeUsage 配置",
+        default_text=existing,
+        ok="确定",
+        cancel="取消",
+        dimensions=(320, 24),
+    )
+    resp = w.run()
+    if resp.clicked:
+        return resp.text.strip()
+    return None
+
+
 # ---------- 应用 ----------
 
 class ClaudeUsageApp(rumps.App):
-    def __init__(self, api_id: str, refresh_seconds: int):
+    def __init__(self, refresh_seconds: int):
         super().__init__("✦ Claude …", quit_button=None)
-        self.api_id = api_id
         self.refresh_seconds = refresh_seconds
+        self.api_id = ""
         self._first_fire = True
         self._build_loading_menu()
-        # 不能在 __init__ 里直接调用 update()——此时 run loop 还没起，
-        # 对 NSStatusItem 的 title/menu 设置无效，结果就是菜单栏空白。
-        # 让 timer 在 run loop 启动后才触发首次刷新。
         self._timer = rumps.Timer(self._tick, 1.0)
         self._timer.start()
 
+    def _ensure_api_id(self) -> bool:
+        """确保 api_id 已配置，未配置则弹窗引导。返回是否就绪。"""
+        if self.api_id:
+            return True
+        cfg = _load_config()
+        if cfg.get("api_id"):
+            self.api_id = cfg["api_id"]
+            return True
+        # 弹窗让用户输入
+        new_id = _prompt_api_id()
+        if not new_id:
+            return False
+        cfg["api_id"] = new_id
+        cfg.setdefault("refresh_seconds", 300)
+        _save_config(cfg)
+        self.api_id = new_id
+        return True
+
     def _tick(self, sender):
+        if not self._ensure_api_id():
+            self.title = "✦ 未配置"
+            self._build_unconfigured_menu()
+            if self._first_fire:
+                self._first_fire = False
+                self._timer.stop()
+                self._timer = rumps.Timer(self._tick, self.refresh_seconds)
+                self._timer.start()
+            return
         self.update(sender)
         if self._first_fire:
             self._first_fire = False
-            # 切换到真正的刷新间隔
             self._timer.stop()
             self._timer = rumps.Timer(self._tick, self.refresh_seconds)
             self._timer.start()
@@ -130,11 +184,21 @@ class ClaudeUsageApp(rumps.App):
         self.menu.clear()
         self.menu = ["加载中…"]
 
+    def _build_unconfigured_menu(self):
+        self.menu.clear()
+        self.menu = [
+            "⚠️ 未配置 API ID",
+            None,
+            rumps.MenuItem("⚙️ 设置 API ID", callback=self._on_set_api_id),
+            rumps.MenuItem("❌ 退出", callback=rumps.quit_application),
+        ]
+
     def _build_error_menu(self):
         self.menu.clear()
         self.menu = [
             "⚠️ 获取失败",
             None,
+            rumps.MenuItem("⚙️ 设置 API ID", callback=self._on_set_api_id),
             rumps.MenuItem("🔄 立即刷新", callback=self._tick),
             rumps.MenuItem("❌ 退出", callback=rumps.quit_application),
         ]
@@ -166,10 +230,23 @@ class ClaudeUsageApp(rumps.App):
 
         items.append(rumps.MenuItem(f"累计总费用: {fmt_money(d['total_cost'])}"))
         items.append(None)
+        items.append(rumps.MenuItem("⚙️ 设置 API ID", callback=self._on_set_api_id))
         items.append(rumps.MenuItem("🔄 立即刷新", callback=self._tick))
         items.append(rumps.MenuItem("❌ 退出", callback=rumps.quit_application))
 
         self.menu = items
+
+    # --- 回调 ---
+
+    def _on_set_api_id(self, _sender):
+        new_id = _prompt_api_id(self.api_id)
+        if new_id is None or new_id == self.api_id:
+            return
+        cfg = _load_config()
+        cfg["api_id"] = new_id
+        _save_config(cfg)
+        self.api_id = new_id
+        self.update(None)
 
     # --- 刷新逻辑 ---
 
@@ -186,28 +263,8 @@ class ClaudeUsageApp(rumps.App):
 
 # ---------- 入口 ----------
 
-def load_config() -> dict:
-    if not os.path.exists(CONFIG_PATH):
-        os.makedirs(CONFIG_DIR, exist_ok=True)
-        template = {"api_id": "", "refresh_seconds": 300}
-        with open(CONFIG_PATH, "w") as f:
-            json.dump(template, f, indent=2)
-        rumps.alert(
-            title="ClaudeUsage 首次配置",
-            message=f"已创建配置文件:\n{CONFIG_PATH}\n\n请用文本编辑器打开，填入你的 api_id 后重新启动。",
-        )
-        sys.exit(0)
-    with open(CONFIG_PATH) as f:
-        return json.load(f)
-
-
 def hide_from_dock():
-    """把进程设为菜单栏驻留模式（不在 Dock/Cmd+Tab 显示）。
-
-    必须在 rumps.App 初始化之前调用。当本脚本被一个没有 LSUIElement=true
-    的 .app 壳（例如系统 Python.app）启动时，默认会显示 Dock 图标；
-    通过显式设置 ActivationPolicy 可以强制隐藏。
-    """
+    """把进程设为菜单栏驻留模式（不在 Dock/Cmd+Tab 显示）。"""
     try:
         from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
         NSApplication.sharedApplication().setActivationPolicy_(
@@ -219,13 +276,9 @@ def hide_from_dock():
 
 def main():
     hide_from_dock()
-    cfg = load_config()
-    api_id = cfg.get("api_id")
-    if not api_id:
-        sys.exit("config.json 缺少 api_id")
+    cfg = _load_config()
     refresh = int(cfg.get("refresh_seconds", 300))
-
-    app = ClaudeUsageApp(api_id=api_id, refresh_seconds=refresh)
+    app = ClaudeUsageApp(refresh_seconds=refresh)
     app.run()
 
 
