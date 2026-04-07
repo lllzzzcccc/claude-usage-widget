@@ -8,4 +8,5 @@ config.json
 build/
 dist/
 *.spec
+*.icns
 ClaudeUsage.zip
