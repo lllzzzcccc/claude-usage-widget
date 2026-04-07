@@ -15,7 +15,6 @@ import sys
 import tempfile
 import traceback
 import webbrowser
-import zipfile
 from typing import Optional
 
 import requests
@@ -317,10 +316,13 @@ def _download_and_update(download_url: str, app_path: str):
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
 
-    # 解压
+    # 解压（用 ditto 保留 macOS 权限和元数据）
     extract_dir = os.path.join(tmp_dir, "extracted")
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(extract_dir)
+    os.makedirs(extract_dir, exist_ok=True)
+    subprocess.run(
+        ["ditto", "-xk", zip_path, extract_dir],
+        check=True, timeout=60,
+    )
 
     # 找到解压后的 .app
     new_app = None
@@ -333,9 +335,10 @@ def _download_and_update(download_url: str, app_path: str):
 
     # 用 shell 脚本完成替换和重启（当前进程退出后执行）
     script = f"""#!/bin/bash
-sleep 1
+sleep 2
 rm -rf "{app_path}"
 mv "{new_app}" "{app_path}"
+chmod -R +x "{app_path}/Contents/MacOS/"
 xattr -cr "{app_path}"
 open "{app_path}"
 rm -rf "{tmp_dir}"
