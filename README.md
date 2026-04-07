@@ -4,6 +4,12 @@ macOS 菜单栏小组件，实时显示 Claude API 用量统计。
 
 常驻菜单栏，一目了然查看今日/本月费用、请求次数、Token 用量及模型明细。
 
+## 预览
+
+<p align="center">
+  <img src="screenshots/result.png" width="300" />
+</p>
+
 ## 功能
 
 - 菜单栏实时显示今日费用
