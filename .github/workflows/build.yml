@@ -1,0 +1,55 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Generate icon
+        run: python make_icon.py
+
+      - name: Build app
+        run: |
+          pyinstaller \
+            --name ClaudeUsage \
+            --windowed \
+            --icon AppIcon.icns \
+            --osx-bundle-identifier com.moonshot.claude-usage-widget \
+            --target-arch universal2 \
+            --hidden-import rumps \
+            --hidden-import requests \
+            --hidden-import AppKit \
+            --hidden-import Foundation \
+            --hidden-import objc \
+            --hidden-import PyObjCTools \
+            widget.py
+
+      - name: Set Info.plist
+        run: |
+          plutil -replace LSUIElement -bool true dist/ClaudeUsage.app/Contents/Info.plist
+          plutil -replace CFBundleDisplayName -string "Claude 用量" dist/ClaudeUsage.app/Contents/Info.plist
+          plutil -replace NSHighResolutionCapable -bool true dist/ClaudeUsage.app/Contents/Info.plist
+
+      - name: Zip app
+        run: cd dist && zip -r ../ClaudeUsage.zip ClaudeUsage.app
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ClaudeUsage.zip
+          generate_release_notes: true
