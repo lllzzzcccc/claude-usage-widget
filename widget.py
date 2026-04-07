@@ -405,6 +405,49 @@ def _check_update():
 
 # ---------- 入口 ----------
 
+def _check_quarantine():
+    """检测 app 是否被 macOS 隔离，若是则尝试自动移除并提示重启。"""
+    app_path = _get_app_path()
+    if not app_path:
+        return
+    try:
+        result = subprocess.run(
+            ["xattr", "-l", app_path],
+            capture_output=True, text=True, timeout=5,
+        )
+        if "com.apple.quarantine" not in result.stdout:
+            return
+    except Exception:
+        return
+
+    # 尝试自动移除隔离属性
+    removed = False
+    try:
+        subprocess.run(
+            ["xattr", "-cr", app_path],
+            capture_output=True, timeout=5,
+        )
+        removed = True
+    except Exception:
+        pass
+
+    if removed:
+        rumps.alert(
+            title="首次启动配置",
+            message="已自动完成安全设置，请重新打开应用。",
+        )
+    else:
+        rumps.alert(
+            title="需要解除安全限制",
+            message=(
+                "macOS 阻止了未签名应用运行，请在终端执行：\n\n"
+                f"xattr -cr \"{app_path}\"\n\n"
+                "然后重新打开应用。"
+            ),
+        )
+    sys.exit(0)
+
+
 def hide_from_dock():
     """把进程设为菜单栏驻留模式（不在 Dock/Cmd+Tab 显示）。"""
     try:
@@ -418,6 +461,7 @@ def hide_from_dock():
 
 def main():
     hide_from_dock()
+    _check_quarantine()
     _check_update()
     cfg = _load_config()
     refresh = int(cfg.get("refresh_seconds", 300))
