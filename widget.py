@@ -118,8 +118,13 @@ def _load_config() -> dict:
 def _prompt_api_id(existing: str = "") -> Optional[str]:
     """弹出输入框让用户输入 api_id，返回 None 表示用户取消。"""
     w = rumps.Window(
-        message="请输入你的 API ID：",
-        title="ClaudeUsage 配置",
+        message=(
+            "获取方式：\n"
+            "1. 打开 claude.ver0.cc/admin-next/api-stats\n"
+            "2. 输入你的 API Key 并刷新页面\n"
+            "3. 地址栏会出现 appId=xxx，复制该值粘贴到下方"
+        ),
+        title="请输入 API ID",
         default_text=existing,
         ok="确定",
         cancel="取消",
